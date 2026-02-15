@@ -15,3 +15,16 @@ export type PendingJob = {
   createdAt: string;
   updatedAt: string;
 };
+
+export type TtsModelDescriptor = {
+  id: string;
+  label: string;
+  languages: string[];
+  voice_presets: string[];
+  default_voice: string;
+  speed_presets: number[];
+};
+
+export type LmModelDescriptor = {
+  id: string;
+};
