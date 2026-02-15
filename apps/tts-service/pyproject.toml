@@ -1,0 +1,28 @@
+[project]
+name = "tts-service"
+version = "0.1.0"
+description = "FastAPI TTS service with Firecrawl + MLX Audio + LM Studio"
+requires-python = ">=3.10"
+dependencies = [
+  "fastapi>=0.128.0",
+  "uvicorn[standard]>=0.30.0",
+  "pydantic>=2.8.0",
+  "pydantic-settings>=2.3.4",
+  "python-dotenv>=1.0.1",
+  "firecrawl>=4.14.1",
+  "openai>=2.11.0",
+  "requests>=2.32.3",
+  "numpy>=2.0.0",
+  "soundfile>=0.13.1",
+  "mlx-audio>=0.3.1"
+]
+
+[project.optional-dependencies]
+dev = [
+  "pytest>=8.2.0",
+  "httpx>=0.28.1"
+]
+
+[tool.pytest.ini_options]
+pythonpath = ["app"]
+testpaths = ["tests"]
