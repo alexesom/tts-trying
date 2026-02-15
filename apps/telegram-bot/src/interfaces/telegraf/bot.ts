@@ -3,7 +3,7 @@ import { Markup, Telegraf } from "telegraf";
 import { env } from "../../config/env";
 import type { TtsModelDescriptor, UserSettings } from "../../domain/types";
 import { SqliteRepository } from "../../infrastructure/db/sqliteRepository";
-import { TtsServiceClient } from "../../infrastructure/http/ttsServiceClient";
+import { TtsServiceClient, type JobStatus } from "../../infrastructure/http/ttsServiceClient";
 
 const MAIN_MENU = [
   ["Select TTS Model"],
@@ -19,7 +19,18 @@ type MenuCache = {
   lmModels: string[];
 };
 
-const DEFAULT_SPEEDS = [0.8, 1.0, 1.2, 1.4];
+const DEFAULT_SPEEDS = [0.8, 1.0, 1.2, 1.4] as const;
+const TERMINAL_STATUSES = new Set(["completed", "partial_failed", "failed", "cancelled"]);
+
+const extractUrls = (text: string): string[] => {
+  const matches = text.match(/https?:\/\/[^\s]+/g) ?? [];
+  return matches.map((url) => url.trim()).filter((url, index, list) => list.indexOf(url) === index);
+};
+
+const sleep = async (ms: number): Promise<void> =>
+  new Promise((resolve) => {
+    setTimeout(resolve, ms);
+  });
 
 export const buildBot = (): Telegraf => {
   const repo = new SqliteRepository(env.botDbPath);
@@ -62,6 +73,86 @@ export const buildBot = (): Telegraf => {
   };
 
   const menuKeyboard = Markup.keyboard(MAIN_MENU).resize();
+
+  const deliverCompletedItems = async (
+    chatId: string,
+    jobId: string,
+    status: JobStatus,
+    delivered: Set<string>
+  ): Promise<void> => {
+    for (const item of status.items) {
+      if (item.status !== "completed" || !item.artifact || delivered.has(item.item_id)) {
+        continue;
+      }
+
+      const artifact = await ttsService.downloadArtifact(jobId, item.item_id);
+      const summary = item.summary?.slice(0, 1024);
+      const fileBase = item.filename || item.item_id;
+
+      if (item.artifact.kind === "voice") {
+        await bot.telegram.sendVoice(
+          chatId,
+          {
+            source: artifact.data,
+            filename: `${fileBase}.ogg`
+          },
+          {
+            caption: summary
+          }
+        );
+      } else {
+        await bot.telegram.sendDocument(
+          chatId,
+          {
+            source: artifact.data,
+            filename: `${fileBase}.mp3`
+          },
+          {
+            caption: summary
+          }
+        );
+      }
+
+      await ttsService.acknowledgeSent(jobId, item.item_id);
+      delivered.add(item.item_id);
+    }
+  };
+
+  const pollAndDeliver = async (chatId: string, jobId: string): Promise<void> => {
+    const delivered = new Set<string>();
+    let rounds = 0;
+
+    while (rounds < 240) {
+      const status = await ttsService.getJob(jobId);
+      repo.upsertPendingJob({ jobId, chatId, status: status.status });
+
+      await deliverCompletedItems(chatId, jobId, status, delivered);
+
+      if (TERMINAL_STATUSES.has(status.status)) {
+        const failed = status.items.filter((item) => item.status === "failed");
+        if (failed.length) {
+          const failedLines = failed
+            .slice(0, 5)
+            .map((item) => `- ${item.url}: ${item.error ?? "processing error"}`)
+            .join("\n");
+          await bot.telegram.sendMessage(chatId, `Some URLs failed:\n${failedLines}`);
+        }
+
+        if (!failed.length && status.status === "completed") {
+          await bot.telegram.sendMessage(chatId, "All audio files were generated and sent.");
+        }
+
+        repo.deletePendingJob(jobId);
+        return;
+      }
+
+      rounds += 1;
+      await sleep(3_000);
+    }
+
+    repo.deletePendingJob(jobId);
+    await bot.telegram.sendMessage(chatId, "Job timed out while polling status.");
+  };
 
   bot.on("text", async (ctx) => {
     const chatId = String(ctx.chat.id);
@@ -142,11 +233,26 @@ export const buildBot = (): Telegraf => {
           );
           return;
         }
-        default:
-          await ctx.reply(
-            "Send one or more URLs to start TTS generation, or use menu buttons to change settings.",
-            menuKeyboard
-          );
+        default: {
+          const urls = extractUrls(text);
+          if (!urls.length) {
+            await ctx.reply(
+              "Send one or more URLs to start TTS generation, or use menu buttons to change settings.",
+              menuKeyboard
+            );
+            return;
+          }
+
+          await ctx.reply(`Accepted ${urls.length} URL(s). Creating TTS job...`, menuKeyboard);
+          const jobId = await ttsService.createJob(chatId, urls, settings);
+          repo.upsertPendingJob({ jobId, chatId, status: "queued" });
+
+          void pollAndDeliver(chatId, jobId).catch(async (error: unknown) => {
+            repo.deletePendingJob(jobId);
+            await bot.telegram.sendMessage(chatId, `Job failed: ${(error as Error).message}`);
+          });
+          return;
+        }
       }
     } catch (error) {
       await ctx.reply(`Error: ${(error as Error).message}`, menuKeyboard);
