@@ -27,7 +27,7 @@ class JobService:
         self._url_concurrency = max(1, url_concurrency)
         self._running_jobs: dict[str, asyncio.Task[None]] = {}
 
-    def create_job(
+    async def create_job(
         self,
         *,
         chat_id: str,

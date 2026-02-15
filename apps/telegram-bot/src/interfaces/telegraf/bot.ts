@@ -1,6 +1,7 @@
 import { Markup, Telegraf } from "telegraf";
 
 import { env } from "../../config/env";
+import { extractUrls } from "../../application/url";
 import type { TtsModelDescriptor, UserSettings } from "../../domain/types";
 import { SqliteRepository } from "../../infrastructure/db/sqliteRepository";
 import { TtsServiceClient, type JobStatus } from "../../infrastructure/http/ttsServiceClient";
@@ -21,11 +22,6 @@ type MenuCache = {
 
 const DEFAULT_SPEEDS = [0.8, 1.0, 1.2, 1.4] as const;
 const TERMINAL_STATUSES = new Set(["completed", "partial_failed", "failed", "cancelled"]);
-
-const extractUrls = (text: string): string[] => {
-  const matches = text.match(/https?:\/\/[^\s]+/g) ?? [];
-  return matches.map((url) => url.trim()).filter((url, index, list) => list.indexOf(url) === index);
-};
 
 const sleep = async (ms: number): Promise<void> =>
   new Promise((resolve) => {

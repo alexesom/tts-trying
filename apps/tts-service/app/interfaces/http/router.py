@@ -78,7 +78,7 @@ def validate_lm_model(
 
 
 @router.post("/v1/jobs", response_model=CreateJobResponse)
-def create_job(
+async def create_job(
     request: CreateJobRequest,
     service: JobService = Depends(get_job_service),
 ) -> CreateJobResponse:
@@ -92,7 +92,7 @@ def create_job(
         filename_model_id=request.lm.filename_model_id,
     )
 
-    job_id = service.create_job(
+    job_id = await service.create_job(
         chat_id=request.chat_id,
         urls=[str(url) for url in request.urls],
         tts=tts,
