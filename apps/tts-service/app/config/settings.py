@@ -1,12 +1,20 @@
 from functools import lru_cache
 from pathlib import Path
 
+from dotenv import load_dotenv
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+REPO_ROOT_ENV_PATH = Path(__file__).resolve().parents[4] / ".env"
+SERVICE_ENV_PATH = Path(__file__).resolve().parents[2] / ".env"
+
+# Load monorepo-level env first, then service-local env (service file overrides shared values).
+load_dotenv(REPO_ROOT_ENV_PATH, override=False)
+load_dotenv(SERVICE_ENV_PATH, override=True)
+
 
 class Settings(BaseSettings):
-    model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
+    model_config = SettingsConfigDict(extra="ignore")
 
     service_host: str = Field(default="127.0.0.1", alias="TTS_SERVICE_HOST")
     service_port: int = Field(default=8000, alias="TTS_SERVICE_PORT")

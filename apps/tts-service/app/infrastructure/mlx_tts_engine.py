@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import inspect
 import re
 import subprocess
 from pathlib import Path
@@ -30,12 +31,7 @@ class MlxTtsEngine:
         segments: list[np.ndarray] = []
 
         for chunk in chunks:
-            generation_kwargs: dict[str, Any] = {
-                "text": chunk,
-                "voice": selection.voice,
-                "speed": selection.speed,
-                "lang_code": "auto",
-            }
+            generation_kwargs = self._build_generation_kwargs(model, selection, chunk)
 
             results = list(model.generate(**generation_kwargs))
             if not results:
@@ -85,6 +81,39 @@ class MlxTtsEngine:
                 model = load_model(model_id)
                 self._models[model_id] = model
             return model
+
+    def _build_generation_kwargs(self, model: Any, selection: TtsSelection, text_chunk: str) -> dict[str, Any]:
+        kwargs: dict[str, Any] = {"text": text_chunk}
+        parameters = inspect.signature(model.generate).parameters
+
+        if "voice" in parameters and selection.voice:
+            kwargs["voice"] = selection.voice
+
+        if "speed" in parameters:
+            kwargs["speed"] = selection.speed
+
+        if "lang_code" in parameters:
+            lang_code = self._resolve_lang_code(selection)
+            if lang_code is not None:
+                kwargs["lang_code"] = lang_code
+
+        return kwargs
+
+    @staticmethod
+    def _resolve_lang_code(selection: TtsSelection) -> str | None:
+        model_id = selection.model_id.lower()
+
+        # Kokoro does not accept \"auto\" and expects a short language code.
+        if "kokoro" in model_id:
+            prefix = (selection.voice or "").strip().lower()[:1]
+            supported = {"a", "b", "e", "f", "h", "i", "p", "j", "z"}
+            return prefix if prefix in supported else "a"
+
+        # Qwen3-TTS accepts \"auto\" as a default value.
+        if "qwen3-tts" in model_id:
+            return "auto"
+
+        return None
 
     @staticmethod
     def _convert_audio(input_path: Path, output_path: Path, codec: str, bitrate: str) -> None:

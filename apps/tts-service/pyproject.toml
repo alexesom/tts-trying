@@ -18,7 +18,11 @@ dependencies = [
   "requests>=2.32.3",
   "numpy>=2.0.0",
   "soundfile>=0.13.1",
-  "mlx-audio>=0.3.1"
+  "mlx-audio>=0.3.1",
+  "misaki",
+  "num2words",
+  "spacy",
+  "phonemizer"
 ]
 
 [project.optional-dependencies]
