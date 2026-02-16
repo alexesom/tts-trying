@@ -19,12 +19,18 @@ class JobService:
         tts_engine: TtsEnginePort,
         lm_client: LmClientPort,
         url_concurrency: int,
+        parse_timeout_seconds: int = 60,
+        tts_task_timeout_seconds: int = 900,
+        lm_task_timeout_seconds: int = 45,
     ) -> None:
         self._repository = repository
         self._parser = parser
         self._tts_engine = tts_engine
         self._lm_client = lm_client
         self._url_concurrency = max(1, url_concurrency)
+        self._parse_timeout_seconds = max(1, parse_timeout_seconds)
+        self._tts_task_timeout_seconds = max(1, tts_task_timeout_seconds)
+        self._lm_task_timeout_seconds = max(1, lm_task_timeout_seconds)
         self._running_jobs: dict[str, asyncio.Task[None]] = {}
 
     async def create_job(
@@ -105,16 +111,31 @@ class JobService:
         self._repository.add_event(job_id, "info", "Item processing started", item_id)
 
         try:
-            article = await asyncio.to_thread(self._parser.parse, item["url"])
-
-            tts_task = asyncio.to_thread(
-                self._tts_engine.synthesize,
-                article.markdown,
-                tts,
-                f"{job_id}-{item_id}",
+            self._repository.add_event(job_id, "info", "Parsing started", item_id)
+            article = await asyncio.wait_for(
+                asyncio.to_thread(self._parser.parse, item["url"]),
+                timeout=self._parse_timeout_seconds,
             )
-            summary_task = asyncio.to_thread(self._lm_client.summarize, article.markdown, lm)
-            filename_task = asyncio.to_thread(self._lm_client.filename, article.markdown, article.url, lm)
+            self._repository.add_event(job_id, "info", "Parsing completed", item_id)
+            self._repository.add_event(job_id, "info", "TTS/LM started", item_id)
+
+            tts_task = asyncio.wait_for(
+                asyncio.to_thread(
+                    self._tts_engine.synthesize,
+                    article.markdown,
+                    tts,
+                    f"{job_id}-{item_id}",
+                ),
+                timeout=self._tts_task_timeout_seconds,
+            )
+            summary_task = asyncio.wait_for(
+                asyncio.to_thread(self._lm_client.summarize, article.markdown, lm),
+                timeout=self._lm_task_timeout_seconds,
+            )
+            filename_task = asyncio.wait_for(
+                asyncio.to_thread(self._lm_client.filename, article.markdown, article.url, lm),
+                timeout=self._lm_task_timeout_seconds,
+            )
 
             tts_result, summary_result, filename_result = await asyncio.gather(
                 tts_task,
@@ -125,6 +146,11 @@ class JobService:
 
             if isinstance(tts_result, Exception):
                 raise tts_result
+
+            if isinstance(summary_result, Exception):
+                self._repository.add_event(job_id, "warning", f"Summary fallback: {summary_result}", item_id)
+            if isinstance(filename_result, Exception):
+                self._repository.add_event(job_id, "warning", f"Filename fallback: {filename_result}", item_id)
 
             summary = (
                 self._fallback_summary(article.markdown)
@@ -147,6 +173,7 @@ class JobService:
                 mime_type=tts_result.mime_type,
                 size_bytes=tts_result.size_bytes,
             )
+            self._repository.add_event(job_id, "info", "TTS/LM completed", item_id)
             self._repository.add_event(job_id, "info", "Item processing completed", item_id)
         except Exception as exc:  # noqa: BLE001
             self._repository.update_item_status(item_id, "failed", str(exc))

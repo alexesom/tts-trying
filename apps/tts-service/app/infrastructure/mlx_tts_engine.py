@@ -15,6 +15,12 @@ from app.domain.entities import ArtifactMeta, TtsSelection
 
 
 class MlxTtsEngine:
+    _QWEN3_VOICE_DESIGN_INSTRUCTS = {
+        "chelsie": "A warm and friendly young female voice with clear articulation and medium pitch.",
+        "ethan": "A calm and confident adult male voice with medium-low pitch and neutral accent.",
+        "serena": "A bright and expressive young female voice with slightly higher pitch and energetic tone.",
+    }
+
     def __init__(self, artifacts_dir: Path, voice_max_bytes: int) -> None:
         self._artifacts_dir = artifacts_dir
         self._artifacts_dir.mkdir(parents=True, exist_ok=True)
@@ -86,8 +92,14 @@ class MlxTtsEngine:
         kwargs: dict[str, Any] = {"text": text_chunk}
         parameters = inspect.signature(model.generate).parameters
 
-        if "voice" in parameters and selection.voice:
+        model_id = selection.model_id.lower()
+        is_qwen3_voice_design = "qwen3-tts" in model_id and "voicedesign" in model_id
+
+        if "voice" in parameters and selection.voice and not is_qwen3_voice_design:
             kwargs["voice"] = selection.voice
+
+        if is_qwen3_voice_design and "instruct" in parameters:
+            kwargs["instruct"] = self._resolve_qwen3_voice_design_instruct(selection.voice)
 
         if "speed" in parameters:
             kwargs["speed"] = selection.speed
@@ -114,6 +126,17 @@ class MlxTtsEngine:
             return "auto"
 
         return None
+
+    def _resolve_qwen3_voice_design_instruct(self, voice: str) -> str:
+        normalized = (voice or "").strip().lower()
+        if normalized in self._QWEN3_VOICE_DESIGN_INSTRUCTS:
+            return self._QWEN3_VOICE_DESIGN_INSTRUCTS[normalized]
+
+        # Allow advanced users to pass a custom voice description directly.
+        if normalized and normalized not in {"default", "voice"}:
+            return voice
+
+        return self._QWEN3_VOICE_DESIGN_INSTRUCTS["chelsie"]
 
     @staticmethod
     def _convert_audio(input_path: Path, output_path: Path, codec: str, bitrate: str) -> None:

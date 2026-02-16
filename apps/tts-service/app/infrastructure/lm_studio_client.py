@@ -94,7 +94,7 @@ class LmStudioClient:
             "Focus on concrete facts and keep the output plain text.\n\n"
             f"Article:\n{text[:12000]}"
         )
-        return self._chat(selection.summary_model_id, prompt)
+        return self._chat(selection.summary_model_id, prompt, max_tokens=220)
 
     def filename(self, text: str, url: str, selection: LmSelection) -> str:
         prompt = (
@@ -103,27 +103,76 @@ class LmStudioClient:
             f"URL: {url}\n"
             f"Content:\n{text[:4000]}"
         )
-        return self._chat(selection.filename_model_id, prompt)
+        return self._chat(selection.filename_model_id, prompt, max_tokens=48)
 
-    def _chat(self, model_id: str, prompt: str) -> str:
-        payload = {
-            "model": model_id,
-            "messages": [
-                {"role": "system", "content": "You are a concise assistant."},
-                {"role": "user", "content": prompt},
-            ],
-            "temperature": 0.2,
-        }
-        response = requests.post(
-            f"{self._base_url}/chat/completions",
-            json=payload,
-            timeout=self._timeout_seconds,
-        )
-        response.raise_for_status()
-        text = self._extract_text(response.json()).strip()
-        if not text:
-            raise ValueError("LM model returned empty response")
-        return text
+    def _chat(self, model_id: str, prompt: str, max_tokens: int) -> str:
+        attempts = [
+            (
+                "chat/completions",
+                {
+                    "model": model_id,
+                    "messages": [
+                        {"role": "system", "content": "You are a concise assistant."},
+                        {"role": "user", "content": prompt},
+                    ],
+                    "temperature": 0.2,
+                    "max_tokens": max_tokens,
+                },
+            ),
+            (
+                "chat/completions",
+                {
+                    "model": model_id,
+                    "messages": [
+                        {
+                            "role": "user",
+                            "content": [
+                                {
+                                    "type": "text",
+                                    "source_lang_code": "en",
+                                    "target_lang_code": "en",
+                                    "text": prompt,
+                                    "image": None,
+                                }
+                            ],
+                        }
+                    ],
+                    "temperature": 0.2,
+                    "max_tokens": max_tokens,
+                },
+            ),
+            (
+                "completions",
+                {
+                    "model": model_id,
+                    "prompt": prompt,
+                    "temperature": 0.2,
+                    "max_tokens": max_tokens,
+                },
+            ),
+        ]
+
+        errors: list[str] = []
+        for endpoint, payload in attempts:
+            try:
+                response = requests.post(
+                    f"{self._base_url}/{endpoint}",
+                    json=payload,
+                    timeout=self._timeout_seconds,
+                )
+                if response.status_code >= 400:
+                    errors.append(f"{endpoint}: {response.text[:200]}")
+                    continue
+
+                text = self._extract_text(response.json()).strip()
+                if text:
+                    return text
+                errors.append(f"{endpoint}: empty response")
+            except Exception as exc:  # noqa: BLE001
+                errors.append(f"{endpoint}: {exc}")
+
+        reason = " | ".join(errors)[:1000] if errors else "Unknown chat error"
+        raise RuntimeError(reason)
 
     @staticmethod
     def _extract_text(payload: dict) -> str:

@@ -35,6 +35,9 @@ job_service = JobService(
     tts_engine=tts_engine,
     lm_client=lm_client,
     url_concurrency=settings.url_concurrency,
+    parse_timeout_seconds=settings.parse_timeout_seconds,
+    tts_task_timeout_seconds=settings.tts_task_timeout_seconds,
+    lm_task_timeout_seconds=settings.lm_task_timeout_seconds,
 )
 
 app = FastAPI(title="TTS Service", version="0.1.0")

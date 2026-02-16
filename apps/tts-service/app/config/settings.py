@@ -34,6 +34,9 @@ class Settings(BaseSettings):
     url_concurrency: int = Field(default=2, alias="TTS_URL_CONCURRENCY")
     voice_max_bytes: int = Field(default=45_000_000, alias="VOICE_MAX_BYTES")
     lm_http_timeout_seconds: int = Field(default=30, alias="LM_HTTP_TIMEOUT_SECONDS")
+    parse_timeout_seconds: int = Field(default=60, alias="PARSE_TIMEOUT_SECONDS")
+    tts_task_timeout_seconds: int = Field(default=900, alias="TTS_TASK_TIMEOUT_SECONDS")
+    lm_task_timeout_seconds: int = Field(default=45, alias="LM_TASK_TIMEOUT_SECONDS")
 
 
 @lru_cache
